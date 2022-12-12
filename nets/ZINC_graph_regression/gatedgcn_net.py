@@ -75,8 +75,8 @@ class GatedGCNNet(nn.Module):
         # input embedding
         h = self.embedding_h(h)
         h = self.in_feat_dropout(h)
-        print("========================h0===============")
-        print(h)
+        # print("========================h0===============")
+        # print(h)
         
         if self.pe_init in ['rand_walk', 'lap_pe']:
             p = self.embedding_p(p) 
@@ -85,16 +85,16 @@ class GatedGCNNet(nn.Module):
             h = h + p
             p = None
 
-        print("========================p1===============")
-        print(p)
+        # print("========================p1===============")
+        # print(p)
         
-        print("========================e1===============")
-        print(e)
+        # print("========================e1===============")
+        # print(e)
         if not self.edge_feat: # edge feature set to 1
             e = torch.ones(e.size(0),1).to(self.device)
         e = self.embedding_e(e)   
-        print("========================e2===============")
-        print(e)
+        # print("========================e2===============")
+        # print(e)
         
         
         # convnets
@@ -102,14 +102,14 @@ class GatedGCNNet(nn.Module):
             h, p, e = conv(g, h, p, e, snorm_n)
             
         g.ndata['h'] = h
-        print("========================h1===============")
-        print(g.ndata['h'])
+        # print("========================h1===============")
+        # print(g.ndata['h'])
         
         if self.pe_init == 'rand_walk':
             
             p = self.p_out(p)
-            print("========================p2.5===============")
-            print(p)
+            # print("========================p2.5===============")
+            # print(p)
             g.ndata['p'] = p
 
             # Implementing p_g = p_g / torch.norm(p_g, p=2, dim=0)
@@ -120,14 +120,11 @@ class GatedGCNNet(nn.Module):
 
             # Implementing p_g = p_g - torch.mean(p_g, dim=0)
             means = dgl.mean_nodes(g, 'p')
-            print(g)
-            print(g.batch_num_nodes())
-            print(g.ndata['feat'])
-            print(g.edata['feat'])
+
             batch_wise_p_means = means.repeat_interleave(g.batch_num_nodes(), 0)
             p = p - batch_wise_p_means
-            print("========================p2===============")
-            print(p)
+            # print("========================p2===============")
+            # print(p)
             
             # c = torch.full_like(p, fill_value=float(0))
             # mask = (batch_wise_p_l2_norms != 0)
@@ -138,10 +135,10 @@ class GatedGCNNet(nn.Module):
             # print(c)
         
             # Concat h and p
-            print("========================h2===============")
-            print(g.ndata['h'])
-            print("========================p4===============")
-            print(g.ndata['p'])
+            # print("========================h2===============")
+            # print(g.ndata['h'])
+            # print("========================p4===============")
+            # print(g.ndata['p'])
             hp = self.Whp(torch.cat((g.ndata['h'],g.ndata['p']),dim=-1))
             g.ndata['h'] = hp
         
@@ -154,8 +151,8 @@ class GatedGCNNet(nn.Module):
             hg = dgl.mean_nodes(g, 'h')
         else:
             hg = dgl.mean_nodes(g, 'h')  # default readout is mean nodes
-        print("========================hg===============")
-        print(hg)
+        # print("========================hg===============")
+        # print(hg)
         self.g = g # For util; To be accessed in loss() function
         
         return self.MLP_layer(hg), g

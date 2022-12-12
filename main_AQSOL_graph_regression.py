@@ -48,6 +48,7 @@ class DotDict(dict):
 """
 from nets.ZINC_graph_regression.load_net import gnn_model # import all GNNS
 from data.data import LoadData # import dataset
+from data.aqsol import MoleculeDatasetDGL, MoleculeDGL
 
 
 
@@ -98,8 +99,8 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
     per_epoch_time = []
         
     DATASET_NAME = dataset.name
-    if os.path.isfile('dataset_zinc.pkl'):
-        with open('dataset_zinc.pkl', 'rb') as inp:
+    if os.path.isfile('dataset_aqsol.pkl'):
+        with open('dataset_aqsol.pkl', 'rb') as inp:
             dataset = pickle.load(inp)
     elif net_params['pe_init'] == 'lap_pe':
         tt = time.time()
@@ -116,8 +117,8 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
         print("[!] -LSPE (For viz later): Adding lapeigvecs to key 'eigvec' for every graph.")
         dataset._add_eig_vecs(net_params['pos_enc_dim'])
         print("[!] Time taken: ", time.time()-tt)
-    if not os.path.isfile('dataset_zinc.pkl'):
-        with open('dataset_zinc.pkl', 'wb') as outp:
+    if not os.path.isfile('dataset_aqsol.pkl'):
+        with open('dataset_aqsol.pkl', 'wb') as outp:
             pickle.dump(dataset, outp, pickle.HIGHEST_PROTOCOL)
     
     if MODEL_NAME in ['SAN', 'GraphiT']:
@@ -415,7 +416,7 @@ def main():
         net_params['pe_init'] = args.pe_init
         
     
-    # ZINC
+    # AQSOL
     net_params['num_atom_type'] = dataset.num_atom_type
     net_params['num_bond_type'] = dataset.num_bond_type
 

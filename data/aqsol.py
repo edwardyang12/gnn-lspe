@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 import csv
-
+import pickle
 import dgl
 from tqdm import tqdm
 from scipy import sparse as sp
@@ -18,8 +18,6 @@ import networkx as nx
 # [<split>.pickle and <split>.index; for split 'train', 'val' and 'test']
 
 
-
-
 class MoleculeDGL(torch.utils.data.Dataset):
     def __init__(self, data_dir, split, num_graphs=None):
         self.data_dir = data_dir
@@ -28,24 +26,6 @@ class MoleculeDGL(torch.utils.data.Dataset):
         
         with open(data_dir + "/%s.pickle" % self.split,"rb") as f:
             self.data = pickle.load(f)
-
-        if self.num_graphs in [10000, 1000]:
-            # loading the sampled indices from file ./zinc_molecules/<split>.index
-            with open(data_dir + "/%s.index" % self.split,"r") as f:
-                data_idx = [list(map(int, idx)) for idx in csv.reader(f)]
-                self.data = [ self.data[i] for i in data_idx[0] ]
-
-            assert len(self.data)==num_graphs, "Sample num_graphs again; available idx: train/val/test => 10k/1k/1k"
-        
-        """
-        data is a list of Molecule dict objects with following attributes
-        
-          molecule = data[idx]
-        ; molecule['num_atom'] : nb of atoms, an integer (N)
-        ; molecule['atom_type'] : tensor of size N, each element is an atom type, an integer between 0 and num_atom_type
-        ; molecule['bond_type'] : tensor of size N x N, each element is a bond type, an integer between 0 and num_bond_type
-        ; molecule['logP_SA_cycle_normalized'] : the chemical property to regress, a float variable
-        """
         
         self.graph_lists = []
         self.graph_labels = []
@@ -53,38 +33,46 @@ class MoleculeDGL(torch.utils.data.Dataset):
         self._prepare()
     
     def _prepare(self):
-        print("preparing %d graphs for the %s set..." % (self.num_graphs, self.split.upper()))
+        print("preparing %d graphs for the %s set..." % (self.n_samples, self.split.upper()))
         
         for molecule in tqdm(self.data):
-            node_features = molecule['atom_type'].long()
-            
-            adj = molecule['bond_type']
-            edge_list = (adj != 0).nonzero()  # converting adj matrix to edge_list
-            
-            edge_idxs_in_adj = edge_list.split(1, dim=1)
-            edge_features = adj[edge_idxs_in_adj].reshape(-1).long()
-            if molecule['num_atom'] > len(edge_list):
-                print("wtf")
-            # Create the DGL Graph
-            g = dgl.DGLGraph()
-            g.add_nodes(molecule['num_atom'])
-            g.ndata['feat'] = node_features
-            reachable = set()
-            for src, dst in edge_list:
-                g.add_edges(src.item(), dst.item())
-                reachable.add(src.item())
-                reachable.add(dst.item())
-            g.edata['feat'] = edge_features
-            
-            if len(reachable) != molecule['num_atom']:
-                print(len(reachable), molecule['num_atom'])
+            x, edge_attr, edge_index, y = molecule
+            if len(x)==0 or len(edge_index[0])==0 or len(edge_attr)==0:
+                print(x, edge_index, edge_attr)
+                continue
 
+            reachable = set()
+            for i in range(len(edge_index[0])):
+                reachable.add(edge_index[0][i])
+                reachable.add(edge_index[1][i])
+            all = set([i for i in range(len(x))])
+            cant = list(all.difference(reachable))
+            # if len(cant)>0:
+            #     print(cant)
+            #     print(x, edge_attr, edge_index)
+            remap = {i:i for i in range(len(x))}
+            for i in cant:
+                for j in range(i,len(x)):
+                    remap[j]-=1
+            x = np.delete(x, cant)
+            g = dgl.DGLGraph()
+            g.add_nodes(len(x))
+            g.ndata['feat'] = torch.tensor(x).long()
+            for i in range(len(edge_index[0])):
+                g.add_edges(remap[edge_index[0][i]], remap[edge_index[1][i]])
+            g.edata['feat'] = torch.tensor(edge_attr).long()
+            # if len(cant)>0:
+            #     print(x, edge_attr)
+            #     for i in range(len(edge_index[0])):
+            #         print(remap[edge_index[0][i]], remap[edge_index[1][i]])
+            #     break
             self.graph_lists.append(g)
-            self.graph_labels.append(molecule['logP_SA_cycle_normalized'])
+            self.graph_labels.append(torch.tensor(y))
+        self.n_samples = len(self.graph_lists)
         
     def __len__(self):
         """Return the number of graphs in the dataset."""
-        return self.n_samples
+        return len(self.graph_lists)
 
     def __getitem__(self, idx):
         """
@@ -103,26 +91,22 @@ class MoleculeDGL(torch.utils.data.Dataset):
     
     
 class MoleculeDatasetDGL(torch.utils.data.Dataset):
-    def __init__(self, name='Zinc'):
+    def __init__(self, name='AQSOL'):
         t0 = time.time()
         self.name = name
         
-        self.num_atom_type = 28 # known meta-info about the zinc dataset; can be calculated as well
-        self.num_bond_type = 4 # known meta-info about the zinc dataset; can be calculated as well
+        self.num_atom_type = 65 
+        self.num_bond_type = 5
         
-        data_dir='/edward-slow-vol/Graphs/datasets/ZINC/raw'
-        
-        if self.name == 'ZINC-full':
-            data_dir='./data/molecules/zinc_full'
-            self.train = MoleculeDGL(data_dir, 'train', num_graphs=220011)
-            self.val = MoleculeDGL(data_dir, 'val', num_graphs=24445)
-            self.test = MoleculeDGL(data_dir, 'test', num_graphs=5000)
-        else:            
-            self.train = MoleculeDGL(data_dir, 'train', num_graphs=10000)
-            self.val = MoleculeDGL(data_dir, 'val', num_graphs=1000)
-            self.test = MoleculeDGL(data_dir, 'test', num_graphs=1000)
+        data_dir='/edward-slow-vol/Graphs/datasets/AQSOL/raw'
+                
+        self.train = MoleculeDGL(data_dir, 'train')
+        self.val = MoleculeDGL(data_dir, 'val')
+        self.test = MoleculeDGL(data_dir, 'test')
         print("Time taken: {:.4f}s".format(time.time()-t0))
-        
+        print(len(self.train))
+        print(len(self.val))
+        print(len(self.test))
 
 
 def add_eig_vec(g, pos_enc_dim):
@@ -270,12 +254,12 @@ def make_full_graph(g, adaptive_weighting=None):
         
     return full_g
 
-# same thing as what's generated using previous two classes
+
 class MoleculeDataset(torch.utils.data.Dataset):
 
     def __init__(self, name):
         """
-            Loading ZINC datasets
+            Loading AQSOL datasets
         """
         start = time.time()
         print("[I] Loading dataset %s..." % (name))
@@ -283,13 +267,11 @@ class MoleculeDataset(torch.utils.data.Dataset):
         data_dir = 'data/molecules/'
         with open(data_dir+name+'.pkl',"rb") as f:
             f = pickle.load(f)
-            self.train = f[0]
-            self.val = f[1]
-            self.test = f[2]
-            self.num_atom_type = f[3]
-            self.num_bond_type = f[4]
-        # print(self.test[0][0].ndata['feat'])
-        # print(self.test[0][0].edata['feat'])
+            self.train = f.train
+            self.val = f.val
+            self.test = f.test
+            self.num_atom_type = f.num_atom_type
+            self.num_bond_type = f.num_bond_type
         print('train, test, val sizes :',len(self.train),len(self.test),len(self.val))
         print("[I] Finished loading.")
         print("[I] Data load time: {:.4f}s".format(time.time()-start))
@@ -334,7 +316,10 @@ class MoleculeDataset(torch.utils.data.Dataset):
         self.val.graph_lists = [make_full_graph(g, adaptive_weighting) for g in self.val.graph_lists]
         self.test.graph_lists = [make_full_graph(g, adaptive_weighting) for g in self.test.graph_lists]
 
+
 if __name__ == "__main__":
     test = MoleculeDatasetDGL()
     print(test.test[0][0].ndata['feat'])
     print(test.test[0][0].edata['feat'])
+    with open('AQSOL.pkl', 'wb') as f:
+        pickle.dump(test, f)
